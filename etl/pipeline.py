@@ -13,7 +13,7 @@ CSV_FILE = os.path.join("data", "dutch_railway_raw.csv")
 
 # Load credentials from .streamlit/secrets.toml
 # For any use of special characters in the password
-db_conf = st.secrets["mysql"]
+db_conf = st.secrets["connections.mysql"]
 DB_URI = f"mysql+pymysql://{db_conf['user']}:{db_conf['password']}@{db_conf['host']}:{db_conf['port']}/{db_conf['database']}"
 engine = create_engine(DB_URI)
 

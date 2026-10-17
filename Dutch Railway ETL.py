@@ -1,3 +1,4 @@
+from datetime import date, time
 import pandas as pd
 from sqlalchemy import create_engine, text
 
@@ -32,7 +33,6 @@ raw_df = pd.read_csv(CSV_FILE)
 print(f"Dutch Railway Dataset loaded: '{CSV_FILE}'")
 print(f"Entries extracted: {len(raw_df):,}\n")
 
-
 # Auditing initial columns, you can enable this triple quoted section
 # to see the unique values of each column in the original dataset.
 
@@ -57,18 +57,146 @@ cleaned_df = raw_df.copy()
 
 cleaned_df['Service:RDT-ID'] = cleaned_df['Service:RDT-ID'].astype(str).str.strip()
 cleaned_df['Stop:RDT-ID'] = cleaned_df['Stop:RDT-ID'].astype(str).str.strip()
-cleaned_df['Service:Type'] = cleaned_df['Service:Type'].astype(str).str.strip().str.title()
 cleaned_df['Service:Train number'] = cleaned_df['Service:Train number'].astype(str).str.strip()
 
 # Station code and name have some unknown values, standardize them to UNK and Unknown respectively
 cleaned_df['Stop:Station code'] = cleaned_df['Stop:Station code'].fillna('UNK').astype(str).str.strip().str.upper()
 cleaned_df['Stop:Station name'] = cleaned_df['Stop:Station name'].fillna('Unknown').astype(str).str.strip()
 
-# In company, notice that '200' is present, this is a FlixTrain service, so standardize it as such.
-# Will keep searching if this is persistent with how Dutch Railway documents companies.
+# Standardizing company names
+# In company, notice that there are companies reffered to as numeric codes.
+# After further research, I stumbled upon a list of Dutch Railway companies and their corresponding codes.
+# Codes are here: https://reisinformatiegroep.nl/ndovloket/Data/DownloadDocumentation/2
+# All unnecessary spaces are removed with casing preserved as is as some companies have their full names while others have initials.
 cleaned_df['Service:Company'] = cleaned_df['Service:Company'].astype(str).str.strip()
-company_mapping = {'200': 'FlixTrain'}
+company_mapping = {
+    # Mapping numeric codes to corresponding company names
+    # Note however, that there are some codes not in the list so it's left as is
+    '3': 'BBA',
+    '12': 'SBM',
+    '14': 'Novio',
+    '15': 'Oad',
+    '20': 'Stadsvervoer Oss',
+    '21': 'Stadsvervoer Nederland',
+    '22': 'GVB',
+    '23': 'HTM',
+    '24': 'Ret',
+    '25': 'GVU',
+    '26': 'Wagenborg',
+    '27': 'Teso',
+    '28': 'Rederij NACO',
+    '29': 'Waterbus',
+    '30': 'Provinciale Stoombootdiensten',
+    '36': 'Svd',
+    '37': 'R-net',
+    '41': 'Largo Recorrido Renfe',
+    '46': 'Limex',
+    '47': 'Rederij Doeksen',
+    '50': 'Veren (OVR)',
+    '51': 'Arr.- Breng',
+    '52': 'Breng',
+    '53': 'Mti',
+    '54': 'Valleilijn',
+    '55': 'Blauwnet',
+    '56': 'Eurobahn',
+    '056': 'Eurobahn',
+    '58': 'RRReis',
+    '60': 'ABRN',
+    '61': 'VIAS',
+    '83': 'Ferrovie dello Stato',
+    '100': 'NS',
+    '200': 'NS International',
+    '210': 'European Sleeper',
+    '310': 'EETC',
+    '400': 'Syntus',
+    '500': 'Arriva',
+    '501': 'Hermes',
+    '600': 'Connexxion',
+    '750': 'Qbuzz',
+    '751': 'U-OV',
+    '803': 'Arriva Noord',
+    '806': 'Noordned (OVR)',
+    '850': 'STENA',
+    '900': 'British Rail',
+    '910': 'DB',
+    '911': 'Keolis',
+    '920': 'NMBS',
+    '930': 'Danske Statsbaner',
+    '940': 'Schweizerische Bundesbahn',
+    '941': 'Zwitserland Smallspoor',
+    '942': 'ceske drahy',
+    '950': 'Oestereichische Bahn',
+    '951': 'Eurostar',
+    '960': 'Overig Internationaal',
+    '962': 'Locon Benelux',
+    '970': 'Chemins de Fer Luxembourg',
+    '980': 'Franse Spoorwegen',
+
+    # Umbrella companies mapped to main company name 
+    'Blauwnet A': 'Blauwnet',
+    'Blauwnet K': 'Blauwnet',
+    'RRReis A': 'RRReis',
+    'RRReis K': 'RRReis',
+    'R-net NS': 'R-net',
+    'R-net Qb': 'R-net',
+
+    # Standardizing company names
+    'Deutsche B': 'DB',
+    'EB': 'Eurobahn',
+    'Eu Sleeper': 'European Sleeper',
+    'NS Int': 'NS International',
+    'TCS OV': 'TCS',
+
+    # Existing companies mapped to themselves for when other services are added, consistency is ensured.
+    'Arriva': 'Arriva',
+    'Blauwnet': 'Blauwnet',
+    'Breng': 'Breng',
+    'Chemins de Fer Luxembourg': 'Chemins de Fer Luxembourg',
+    'DB': 'DB',
+    'Eurobahn': 'Eurobahn',
+    'Keolis': 'Keolis',
+    'NMBS': 'NMBS',
+    'NS': 'NS',
+    'NS International': 'NS International',
+    'R-net': 'R-net',
+    'RRReis': 'RRReis',
+    'TCS': 'TCS',
+    'VIAS': 'VIAS'
+}
 cleaned_df['Service:Company'] = cleaned_df['Service:Company'].replace(company_mapping)
+
+
+# Standardizing service types
+# All are title case and have unnecessary spaces removed.
+cleaned_df['Service:Type'] = cleaned_df['Service:Type'].astype(str).str.strip().str.title()
+service_type_mapping = {
+    # Same service so mapping to one name for consistency
+    'Ice': 'Ice International',
+    
+    # Existing services mapped to themselves for when other services are needed, consistency is ensured.
+    'Belbus Ipv Trein': 'Belbus Ipv Trein',
+    'Bus': 'Bus',
+    'Eurocity': 'Eurocity',
+    'Eurocity Direct': 'Eurocity Direct',
+    'European Sleeper': 'European Sleeper',
+    'Eurostar': 'Eurostar',
+    'Ice International': 'Ice International',
+    'Int. Trein': 'Int. Trein',
+    'Intercity': 'Intercity',
+    'Intercity Direct': 'Intercity Direct',
+    'Metro Ipv Trein': 'Metro Ipv Trein',
+    'Nachttrein': 'Nachttrein',
+    'Nightjet': 'Nightjet',
+    'Ov-Bus Ipv Trein': 'Ov-Bus Ipv Trein',
+    'Snelbus Ipv Trein': 'Snelbus Ipv Trein',
+    'Sneltrein': 'Sneltrein',
+    'Sprinter': 'Sprinter',
+    'Stopbus Ipv Trein': 'Stopbus Ipv Trein',
+    'Stoptrein': 'Stoptrein',
+    'Taxibus Ipv Trein': 'Taxibus Ipv Trein'
+}
+
+cleaned_df['Service:Type'] = cleaned_df['Service:Type'].replace(service_type_mapping)
 
 # Date and Time Standardization
 cleaned_df['Service:Date'] = pd.to_datetime(cleaned_df['Service:Date'], format='%Y-%m-%d', errors='coerce')
@@ -106,36 +234,82 @@ dim_date = pd.DataFrame({
     'year': unique_dates.dt.year,
     'is_weekend': unique_dates.dt.dayofweek >= 5
 })
+unknown_date_row = pd.DataFrame([{
+    'date_key': -1,
+    'full_date': date(1000, 1, 1),
+    'day': -1,
+    'day_of_week': 'N/A',
+    'week_number': -1,
+    'month': -1,
+    'month_name': 'N/A',
+    'quarter': -1,
+    'year': -1,
+    'is_weekend': False
+}])
 
-# dim_station table true to the schema
-dim_station_raw = cleaned_df[['Stop:Station code', 'Stop:Station name']].drop_duplicates().dropna()
-dim_station = pd.DataFrame({
-    'station_code': dim_station_raw['Stop:Station code'],
-    'station_name': dim_station_raw['Stop:Station name']
-}).reset_index(drop=True)
+dim_date = pd.concat([unknown_date_row, dim_date], ignore_index=True)
 
-# dim_service table true to the schema
+# dim_station table true to the schema & accounting for unknown station keys
+dim_station_raw = cleaned_df[['Stop:Station code', 'Stop:Station name']].drop_duplicates(subset=['Stop:Station code']).dropna()
+
+unknown_station_row = pd.DataFrame([{
+    'station_code': 'UNK',
+    'station_name': 'Unknown Station'
+}])
+
+dim_station = pd.concat([
+    unknown_station_row, 
+    pd.DataFrame({
+        'station_code': dim_station_raw['Stop:Station code'],
+        'station_name': dim_station_raw['Stop:Station name']
+    })
+], ignore_index=True)
+
+# dim_service table true to the schema & accounting for unknown service keys 
 dim_service_raw = cleaned_df[['Service:Train number', 'Service:Type', 'Service:Company']].drop_duplicates().dropna()
-dim_service = pd.DataFrame({
-    'train_number': dim_service_raw['Service:Train number'],
-    'service_type': dim_service_raw['Service:Type'],
-    'company': dim_service_raw['Service:Company']
-}).reset_index(drop=True)
+
+unknown_service_row = pd.DataFrame([{
+    'train_number': 'UNK',
+    'service_type': 'Unknown',
+    'company': 'Unknown'
+}])
+
+dim_service = pd.concat([
+    unknown_service_row,
+    pd.DataFrame({
+        'train_number': dim_service_raw['Service:Train number'],
+        'service_type': dim_service_raw['Service:Type'],
+        'company': dim_service_raw['Service:Company']
+    })
+], ignore_index=True)
 
 # dim_time table true to the schema
 time_range = pd.date_range("00:00", "23:59", freq="min")
+
 dim_time = pd.DataFrame({
     'time_key': time_range.strftime('%H%M%S').astype(int),
     'full_time': time_range.time,
     'hour': time_range.hour,
     'minute': time_range.minute,
-    'time_period': pd.cut(
-        time_range.hour, 
-        bins=[-1, 5, 11, 16, 21, 24], 
-        labels=['Night', 'Morning', 'Afternoon', 'Evening', 'Night'], 
-        ordered=False
-    )
+    'time_period': pd.Series(
+        pd.cut(
+            time_range.hour, 
+            bins=[-1, 5, 11, 16, 21, 24], 
+            labels=['Late Night', 'Morning', 'Afternoon', 'Evening', 'Night'], 
+            ordered=False
+        )
+    ).astype(str).replace({'Late Night': 'Night'})
 })
+
+unknown_time_row = pd.DataFrame([{
+    'time_key': -1,
+    'full_time': time(0, 0, 0),
+    'hour': -1,
+    'minute': -1,
+    'time_period': 'N/A'
+}])
+
+dim_time = pd.concat([unknown_time_row, dim_time], ignore_index=True)
 
 # Load dimension tables into the database
 with engine.begin() as conn:
@@ -155,29 +329,29 @@ with engine.connect() as conn:
 # Fact table assembly
 fact_df = cleaned_df.copy()
 
-# Date Key Mapping
-fact_df['date_key'] = fact_df['Service:Date'].dt.strftime('%Y%m%d').astype(int)
-
-# Earlier problems were seen with formatting of time values, this ensures keys exactly match integer HHMMSS format.
-# Handling of null values is done by re-aligning the series with the original index and assigning None to NaNs.
-fact_df['arrival_time_key'] = (
-    fact_df['Stop:Arrival time']
-    .dt.strftime('%H%M%S')
-    .dropna()
-    .astype(int)
+# Date and Time Mapping
+# Handling of null values done by filling with -1 to represent unknown times in the fact table.
+fact_df['date_key'] = (
+    fact_df['Service:Date']
+    .dt.strftime('%Y%m%d')
+    .fillna('-1')
+    .astype('int64')
 )
 
-fact_df['arrival_time_key'] = fact_df['arrival_time_key'].reindex(fact_df.index)
-fact_df['arrival_time_key'] = fact_df['arrival_time_key'].astype(object).where(fact_df['arrival_time_key'].notnull(), None)
+# Earlier problems were seen with formatting of time values, this ensures keys exactly match integer HHMMSS format.
+fact_df['arrival_time_key'] = (
+    fact_df['Stop:Arrival time']
+    .dt.strftime('%H%M00')
+    .fillna('-1')
+    .astype('int64')
+)
 
 fact_df['departure_time_key'] = (
     fact_df['Stop:Departure time']
-    .dt.strftime('%H%M%S')
-    .dropna()
-    .astype(int)
+    .dt.strftime('%H%M00')
+    .fillna('-1')
+    .astype('int64')
 )
-fact_df['departure_time_key'] = fact_df['departure_time_key'].reindex(fact_df.index)
-fact_df['departure_time_key'] = fact_df['departure_time_key'].astype(object).where(fact_df['departure_time_key'].notnull(), None)
 
 # Lookup surrogate keys for station and service dimensions
 fact_df = fact_df.merge(
@@ -187,12 +361,18 @@ fact_df = fact_df.merge(
     how='left'
 )
 
+# Numeric value, station key: handling of null values done by filling with -1 to represent unknown station keys
+fact_df['station_key'] = fact_df['station_key'].fillna('-1').astype('int64')
+
 fact_df = fact_df.merge(
     db_dim_service, 
     left_on=['Service:Train number', 'Service:Type', 'Service:Company'], 
     right_on=['train_number', 'service_type', 'company'], 
     how='left'
 )
+
+# Numeric value, service key: handling of null values done by filling with -1 to represent unknown service keys
+fact_df['service_key'] = fact_df['service_key'].fillna('-1').astype('int64')
 
 # Final fact table assembly
 fact_table = pd.DataFrame({
@@ -214,25 +394,32 @@ fact_table = pd.DataFrame({
 })
 
 # Auditing final columns, you can enable this triple quoted section
-# to see the unique values of each column in the fact and dimension tbales/
+# to see the first 1000 unique values of each column in the fact and dimension tables
 
 '''
-def print_full_entity_audit(entity_name, df, columns_to_audit=None):
+def print_full_entity_audit(entity_name, df, columns_to_audit=None, max_uniques_to_print=1000):
     print(f"--- [{entity_name.upper()} ENTITY AUDIT] ---")
     print(f"Total Record Count: {len(df):,}")
     
     cols = columns_to_audit if columns_to_audit else df.columns
     for col in cols:
         uniques = df[col].unique()
-        try:
-            sorted_uniques = sorted(uniques.tolist(), key=lambda x: (x is None, x))
-        except TypeError:
-            sorted_uniques = uniques.tolist()
-            
+        unique_count = len(uniques)
+        
         print(f"Attribute Field: '{col}'")
         print(f"  ├─ Storage Data Type:   {df[col].dtype}")
-        print(f"  ├─ Total Unique Count:  {len(uniques):,}")
-        print(f"  └─ Full Uniques List:\n     {sorted_uniques}")
+        print(f"  ├─ Total Unique Count:  {unique_count:,}")
+        
+        # Filter: Only print the list if unique entries are strictly under threshold
+        if unique_count < max_uniques_to_print:
+            try:
+                sorted_uniques = sorted(uniques.tolist(), key=lambda x: (x is None, str(x)))
+            except TypeError:
+                sorted_uniques = uniques.tolist()
+            print(f"  └─ Full Uniques List:\n     {sorted_uniques}")
+        else:
+            print(f"  └─ Full Uniques List:   [SUPPRESSED - Exceeds {max_uniques_to_print:,} entries]")
+            
         print("-" * 75)
     print("\n")
 
@@ -259,7 +446,7 @@ fact_target_cols = [
     'departure_delay', 
     'service_maximum_delay'
 ]
-print_full_entity_audit("fact_train_stop", fact_table)
+print_full_entity_audit("fact_train_stop", fact_table, columns_to_audit=fact_target_cols)
 '''
 
 with engine.begin() as conn:

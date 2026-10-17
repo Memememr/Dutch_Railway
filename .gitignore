@@ -1,0 +1,7 @@
+# .gitignore
+.venv/
+__pycache__/
+.streamlit/secrets.toml
+*.csv
+data/*.csv
+data/dutch_railway_raw.csv

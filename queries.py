@@ -7,14 +7,14 @@ def run_query(query: str, params: dict = None):
 
 
 # 1. Overall Delays
-def get_avg_delay_report(granularity="Monthly", month="ALL", company="ALL", station="ALL"):
+def get_avg_delay_report(date_granularity="Monthly", month="ALL", company="ALL", station="ALL"):
     date_column = {
         "Yearly": "d.year",
         "Quarterly": "d.quarter",
         "Monthly": "d.month_name",
         "Weekly": "d.week_number",
         "Daily": "d.day",
-    }.get(granularity, "d.month_name")
+    }.get(date_granularity, "d.month_name")
 
     where_clauses = ["1=1"] 
     params = {}

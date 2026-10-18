@@ -13,13 +13,6 @@ st.set_page_config(
     page_icon = "train-icon.png"
 )
 
-
-# ----------------------------------------------------------------------------
-# DATA LAYER
-# ----------------------------------------------------------------------------
-REQUIRED_COLS = ["time_period", "station_name", "avg_departure_delay", "avg_arrival_delay"]
-COL_ALIASES = {"departure_delay": "avg_departure_delay", "arrival_delay": "avg_arrival_delay"}
- 
  
 # ----------------------------------------------------------------------------
 # SHARED UI HELPERS
@@ -45,27 +38,25 @@ def render_avg_delay_report() -> None:
 def render_station_cancellations() -> None:
     st.dataframe(queries.get_station_cancellations())
  
- 
-def render_service_company_reliability() -> None:
+# ----------------------------------------------------------------------------
+# REPORT 3: Service Reliability (get_service_reliability())
+# ----------------------------------------------------------------------------
+def render_service_reliability() -> None:
     st.dataframe(queries.get_service_reliability())
  
- 
-def render_most_delayed_services() -> None:
-    coming_soon(
-        "Most Delayed Services",
-        "Services ranked by delay frequency and duration.",
-        ["KPI cards (top delayed service, total delay minutes)",
-         "Top-N bar chart (N selectable)",
-         "Delay distribution / trend",
-         "Summary table"],
-    )
+
+# ----------------------------------------------------------------------------
+# REPORT 4: Service Related Delays (get_service_delays())
+# ----------------------------------------------------------------------------
+def get_service_related_delays() -> None:
+    st.dataframe(queries.get_service_delays())
  
  
 REPORTS = {
     "Average Delays": render_avg_delay_report,
     "Station Cancellations": render_station_cancellations,
-    "Service Reliability": render_service_company_reliability,
-    "Most Delayed Services": render_most_delayed_services,
+    "Service Reliability": render_service_reliability,
+    "Most Delayed Services": get_service_related_delays,
 }
  
 # ----------------------------------------------------------------------------

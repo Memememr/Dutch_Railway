@@ -1,14 +1,14 @@
 import database
 
 # Overall Delays and Cancaellations
-def get_avg_delay_report(time_granularity = "Monthly", selected_month = "ALL", selected_station="ALL"):
-    time_column = {
+def get_avg_delay_report(date_granularity = "Monthly", selected_month = "ALL", selected_station="ALL"):
+    date_column = {
             "Yearly": "d.year",
             "Quarterly": "d.quarter",
             "Monthly": "d.month_name",
             "Weekly": "d.week_number",
             "Daily": "d.day",
-        }.get(time_granularity, "d.month_name")
+        }.get(date_granularity, "d.month_name")
 
     where_clauses = ["1=1"] 
     params = {}
@@ -27,7 +27,7 @@ def get_avg_delay_report(time_granularity = "Monthly", selected_month = "ALL", s
     query = f"""
     WITH average_delay_time AS(
     SELECT 
-        {time_column} AS 
+        {date_column} AS 
             time_period,
             s.station_name,
             AVG(f.arrival_delay) AS arrival_delay,
@@ -37,7 +37,7 @@ def get_avg_delay_report(time_granularity = "Monthly", selected_month = "ALL", s
         JOIN dim_date AS d ON f.date_key = d.date_key
         JOIN dim_station AS s ON f.station_key = s.station_key
         WHERE {where_sql}
-        GROUP BY {time_column}, s.station_name
+        GROUP BY time_period, s.station_name
     )
     SELECT 
         time_period,
@@ -58,15 +58,13 @@ def get_avg_delay_report(time_granularity = "Monthly", selected_month = "ALL", s
 
 #2.  Cancellations in a station at a certain time
 def get_station_cancellations(date_granularity="Yearly", month = "ALL", station ="ALL"):
-    granularity_map = {
-                "Yearly": "d.year",
-                "Quarterly": "d.quarter",
-                "Monthly": "d.month_name",
-                "Weekly": "d.week_number",
-                "Daily": "d.day",
-            }
-
-    date_column = granularity_map.get(date_granularity, "d.year")
+    date_column = {
+            "Yearly": "d.year",
+            "Quarterly": "d.quarter",
+            "Monthly": "d.month_name",
+            "Weekly": "d.week_number",
+            "Daily": "d.day",
+        }.get(date_granularity, "d.month_name")
     
     where_clauses = ["1=1"] 
     params = {}
@@ -121,7 +119,7 @@ def get_station_cancellations(date_granularity="Yearly", month = "ALL", station 
 
 def get_service_reliability(service_level="Company", company="ALL", service_type="ALL", train="ALL"):
 
-    time_column = {
+    service_column = {
             "Company":"se.company_name",
             "Service Type":"se.service_level",
             "Train Number": "se.train_number"
@@ -184,9 +182,77 @@ def get_service_reliability(service_level="Company", company="ALL", service_type
     
 
 
-
-
 # 4. Service-related delays
+
+def get_service_delays(service_level="Company", company="ALL", service_type="ALL", train="ALL"):    
+
+    service_column = {
+            "Company":"se.company_name",
+            "Service Type":"se.service_level",
+            "Train Number": "se.train_number"
+        }.get(service_level, "se.company_name")
+
+    where_clauses = ["1=1"]
+    params = {}
+
+    if company != "ALL":
+        where_clauses.append("se.company_name = :company")
+        params["company"] = str(company)
+
+    if service_type != "ALL":
+        where_clauses.append("se.service_type = :service_type")
+        params["service_type"] = str(service_type)
+
+    if service_type != "ALL":
+            where_clauses.append("se.train_number = :train")
+            params["train_number"] = str(train)
+
+    # Combine all active filter clauses into one SQL snippet ({where_sql})
+    where_sql = " AND ".join(where_clauses)
+
+    
+    query = f"""
+    WITH service_delay_summary AS (
+        SELECT 
+            {service_level} AS service_level,
+                
+            -- Average Delays
+                ROUND(AVG(f.arrival_delay), 2) AS avg_arrival_delay,
+                ROUND(AVG(f.departure_delay), 2) AS avg_departure_delay,
+                
+            -- Extreme Delays
+                MAX(f.arrival_delay) AS max_arrival_delay,
+                
+            -- Severe Delay Volume (> 15 mins)
+                SUM(CASE WHEN f.arrival_delay > 15 THEN 1 ELSE 0 END) AS severe_delay_count,
+                
+            -- Total Stops Evaluated
+                COUNT(f.train_stop_key) AS total_stops
+        FROM fact_train_stop AS f
+        JOIN dim_service AS se ON f.service_key = se.service_key
+        WHERE {where_sql}
+        GROUP BY {service_level}
+        ) 
+        SELECT
+            service_level,
+            avg_arrival_delay,
+            avg_departure_delay,
+            max_arrival_delay,
+            severe_delay_count,
+            total_stops,
+    
+            -- Window Functions: Rank service levels by delay severity
+            DENSE_RANK() OVER (ORDER BY avg_arrival_delay DESC) AS avg_delay_rank,
+            DENSE_RANK() OVER (ORDER BY severe_delay_count DESC) AS severe_delay_rank
+        FROM service_delay_summary
+        ORDER BY avg_arrival_delay DESC;"""
+
+    return database.run_query(query, params)
+
+    
+
+
+
 
 
 

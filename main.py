@@ -23,7 +23,7 @@ def get_avg_cancellation_report(time_granularity, selected_month):
         {time_column} AS time_period,
             station_name,
             AVG(f.arrival_delay) AS arrival_delay,
-            AVG(f.departure_delay) AS departure_delay,
+            AVG(f.departure_delay) AS departure_delay
         FROM fact_train_stop AS f
         JOIN dim_date AS d ON f.date_key = d.date_key
         JOIN dim_station AS s ON f.station_key = s.station_key
@@ -45,6 +45,14 @@ def get_avg_cancellation_report(time_granularity, selected_month):
 
 
 # top 5 stations with most cancellations
+def get_10_station_cancellations():
+
+    query = f"""
+    SElECT st.station_name
+    FROM fact_stop_table f
+    JOIN dim_station st ON f.station_key = st.station_key
+    GROUP BY station_name
+    """
 
 
 

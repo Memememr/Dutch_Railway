@@ -5,6 +5,13 @@ def run_query(query: str, params: dict = None):
     df = conn.query(query, params=params)
     return df
 
+@st.cache_data(ttl=3600)
+def get_all_stations():
+    """Fetch distinct station names for UI dropdowns."""
+    df = run_query("SELECT DISTINCT station_name FROM dim_station ORDER BY station_name ASC;")
+    if df is not None and not df.empty:
+        return ["ALL"] + df["station_name"].tolist()
+    return ["ALL"]
 
 # 1. Overall Delays
 def get_avg_delay_report(date_granularity="Monthly", month="ALL", company="ALL", station="ALL"):
@@ -28,7 +35,7 @@ def get_avg_delay_report(date_granularity="Monthly", month="ALL", company="ALL",
         params["station"] = str(station)
 
     if company != "ALL":
-        where_clauses.append("se.company_name = :company")
+        where_clauses.append("se.company = :company")
         params["company"] = str(company)
 
     where_sql = " AND ".join(where_clauses)
@@ -124,16 +131,16 @@ def get_station_cancellations(granularity="Yearly", month="ALL", station="ALL"):
 # 3. Service cancellation rate
 def get_service_reliability(service_level="Company", company="ALL", service_type="ALL", train="ALL"):
     service_column = {
-        "Company": "se.company_name",
-        "Service Type": "se.service_level",
+        "Company": "se.company",
+        "Service Type": "se.service_type",
         "Train Number": "se.train_number"
-    }.get(service_level, "se.company_name")
+    }.get(service_level, "se.company")
 
     where_clauses = ["1=1"]
     params = {}
 
     if company != "ALL":
-        where_clauses.append("se.company_name = :company")
+        where_clauses.append("se.company = :company")
         params["company"] = str(company)
 
     if service_type != "ALL":
@@ -185,16 +192,16 @@ def get_service_reliability(service_level="Company", company="ALL", service_type
 # 4. Service-related delays
 def get_service_delays(granularity="Monthly", service_level="Company", company="ALL", service_type="ALL", train="ALL"):    
     service_column = {
-        "Company": "se.company_name",
-        "Service Type": "se.service_level",
+        "Company": "se.company",
+        "Service Type": "se.service_type",
         "Train Number": "se.train_number"
-    }.get(service_level, "se.company_name")
+    }.get(service_level, "se.company")
 
     where_clauses = ["1=1"]
     params = {}
 
     if company != "ALL":
-        where_clauses.append("se.company_name = :company")
+        where_clauses.append("se.company = :company")
         params["company"] = str(company)
 
     if service_type != "ALL":

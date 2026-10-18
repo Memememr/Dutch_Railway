@@ -77,4 +77,4 @@ selected_month = st.selectbox(
 
 
 
-st.dataframe(get_avg_cancellation_report(time_granularity, selected_month))
+st.dataframe(get_avg_cancellation_report(time_granularity, selected_month), hide_index=True)

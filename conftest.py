@@ -1,55 +1,42 @@
 import pytest
 from sqlalchemy import create_engine, text
 
-TEST_DB_URL = "mysql+pymysql://root:password@localhost:3306/dutch_railway_test"
+@pytest.fixture
+def db_session():
+    engine = create_engine("sqlite:///:memory:")
+    conn = engine.connect()
+    
+    conn.execute(text("CREATE TABLE dim_station (station_key INT, station_name TEXT);"))
+    conn.execute(text("CREATE TABLE dim_date (date_key INT, year INT, month_name TEXT, day INT);"))
+    conn.execute(text("CREATE TABLE dim_service (service_key INT, company TEXT, service_type TEXT, train_number TEXT);"))
+    conn.execute(text("""
+        CREATE TABLE fact_train_stop (
+            stop_id INT, station_key INT, date_key INT, service_key INT,
+            arrival_delay REAL, departure_delay REAL, 
+            arrival_cancelled INT, departure_cancelled INT,
+            service_completely_cancelled INT, service_partly_cancelled INT
+        );
+    """))
+    
+    yield conn
+    conn.close()
 
-@pytest.fixture(scope="session")
-def db_engine():
-    """Create a persistent engine for the test session."""
-    engine = create_engine(TEST_DB_URL)
+def seed_sample_data(connection):
+    connection.execute(text("INSERT INTO dim_station VALUES (1, 'Amsterdam Centraal'), (2, 'Utrecht Centraal');"))
+    connection.execute(text("INSERT INTO dim_date VALUES (101, 2026, 'January', 1), (102, 2026, 'January', 2);"))
+    connection.execute(text("INSERT INTO dim_service VALUES (1, 'NS', 'Intercity', '1234');"))
     
-    # Setup test schema (or seed dim/fact tables)
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS dim_station (
-                station_key INT PRIMARY KEY,
-                station_name VARCHAR(255)
-            );
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS dim_date (
-                date_key INT PRIMARY KEY,
-                year INT,
-                month_name VARCHAR(50),
-                day INT
-            );
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS fact_train_stop (
-                stop_id INT PRIMARY KEY,
-                station_key INT,
-                date_key INT,
-                arrival_delay FLOAT,
-                departure_delay FLOAT,
-                arrival_cancelled INT
-            );
-        """))
-    
-    yield engine
-
-    # Teardown: Clean up test tables after tests finish
-    with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS fact_train_stop;"))
-        conn.execute(text("DROP TABLE IF EXISTS dim_station;"))
-        conn.execute(text("DROP TABLE IF EXISTS dim_date;"))
-
-@pytest.fixture(scope="function")
-def db_session(db_engine):
-    """Provides a transactional database session per test function, rolling back changes after."""
-    connection = db_engine.connect()
-    transaction = connection.begin()
-    
-    yield connection
-    
-    transaction.rollback()
-    connection.close()
+    # Insert test data: 3 normal stops + 1 fully cancelled stop
+    connection.execute(text("""
+        INSERT INTO fact_train_stop (
+            stop_id, station_key, date_key, service_key, 
+            arrival_delay, departure_delay, 
+            arrival_cancelled, departure_cancelled, 
+            service_completely_cancelled, service_partly_cancelled
+        )
+        VALUES 
+            (1, 1, 101, 1, 10.0, 5.0, 0, 0, 0, 0),
+            (2, 1, 101, 1, 20.0, 15.0, 0, 0, 0, 0),
+            (3, 2, 101, 1, 5.0,  2.0, 0, 0, 0, 0),
+            (4, 2, 101, 1, 0.0,  0.0, 1, 1, 1, 0);
+    """))

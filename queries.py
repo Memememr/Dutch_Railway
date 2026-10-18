@@ -1,4 +1,12 @@
-import database
+import time
+import streamlit as st
+
+def run_query(query:str, params: dict = None):
+    conn = st.connection("mysql",type = "sql") 
+    df = conn.query(query, params=params)
+
+    return df
+   
 
 # Overall Delays and Cancaellations
 def get_avg_delay_report(date_granularity = "Monthly", selected_month = "ALL", selected_station="ALL"):
@@ -53,7 +61,7 @@ def get_avg_delay_report(date_granularity = "Monthly", selected_month = "ALL", s
         FROM average_delay_time
         ORDER BY time_period ASC;
     """
-    return database.run_query(query, params)
+    return run_query(query, params)
 
 
 #2.  Cancellations in a station at a certain time
@@ -111,7 +119,7 @@ def get_station_cancellations(date_granularity="Yearly", month = "ALL", station 
     ORDER BY time_period ASC, total_cancelled_rank ASC;
     """
 
-    return database.run_query(query, params)
+    return run_query(query, params)
 
 
 
@@ -178,7 +186,7 @@ def get_service_reliability(service_level="Company", company="ALL", service_type
     ORDER BY cancellation_rate DESC;
     """
 
-    return database.run_query(query, params)
+    return run_query(query, params)
     
 
 
@@ -247,7 +255,7 @@ def get_service_delays(service_level="Company", company="ALL", service_type="ALL
         FROM service_delay_summary
         ORDER BY avg_arrival_delay DESC;"""
 
-    return database.run_query(query, params)
+    return run_query(query, params)
 
     
 

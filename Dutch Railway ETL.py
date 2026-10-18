@@ -2,16 +2,13 @@ from datetime import date, time
 import pandas as pd
 from sqlalchemy import create_engine, text
 
-
-# Note: Hi! To use this ETL script with your database (MySQL), edit the confugations below if needed:
+# Note: Hi! To use this ETL script with your database (MySQL), edit the configations below if needed:
 MYSQL_USER = "root"
 MYSQL_PASSWORD = "20241217"                          
 MYSQL_HOST = "localhost"
 MYSQL_PORT = 3306
 # Name is set by the schema itself
 MYSQL_DATABASE = "train_dw"                  
-
-CSV_FILE = "dutch_railway_raw.csv"
 
 # For any use of special characters in the password
 DB_URI = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
@@ -29,46 +26,10 @@ with engine.begin() as conn:
 
 print("\nExisting tables entries deleted and auto-increments reset.\n")
 
-raw_df = pd.read_csv(CSV_FILE)
-print(f"Dutch Railway Dataset loaded: '{CSV_FILE}'")
-print(f"Entries extracted: {len(raw_df):,}\n")
-
-# Auditing initial columns, you can enable this triple quoted section
-# to see the unique values of each column in the original dataset.
-
-'''
-for col in raw_df.columns:
-    uniques = raw_df[col].unique()
-    try:
-        sorted_uniques = sorted(uniques.tolist(), key=lambda x: (x is None, x))
-    except TypeError:
-        sorted_uniques = uniques.tolist()
-        
-    print(f"Attribute Field: '{col}'")
-    print(f"  ├─ Storage Data Type:   {raw_df[col].dtype}")
-    print(f"  ├─ Unique Value Count:  {len(uniques):,}")
-    print(f"  └─ Distinct Values:     {sorted_uniques}")
-    print("-" * 80 + "\n")
-'''
-
-cleaned_df = raw_df.copy()
-
-# String Cleanups
-
-cleaned_df['Service:RDT-ID'] = cleaned_df['Service:RDT-ID'].astype(str).str.strip()
-cleaned_df['Stop:RDT-ID'] = cleaned_df['Stop:RDT-ID'].astype(str).str.strip()
-cleaned_df['Service:Train number'] = cleaned_df['Service:Train number'].astype(str).str.strip()
-
-# Station code and name have some unknown values, standardize them to UNK and Unknown respectively
-cleaned_df['Stop:Station code'] = cleaned_df['Stop:Station code'].fillna('UNK').astype(str).str.strip().str.upper()
-cleaned_df['Stop:Station name'] = cleaned_df['Stop:Station name'].fillna('Unknown').astype(str).str.strip()
-
-# Standardizing company names
-# In company, notice that there are companies reffered to as numeric codes.
-# After further research, I stumbled upon a list of Dutch Railway companies and their corresponding codes.
+# Not part of the loop since we don't have to run mapping multiple times and it's static.
+# In company, we noticed that there are companies reffered to as numeric codes.
+# After further research, we stumbled upon a list of Dutch Railway companies and their corresponding codes.
 # Codes are here: https://reisinformatiegroep.nl/ndovloket/Data/DownloadDocumentation/2
-# All unnecessary spaces are removed with casing preserved as is as some companies have their full names while others have initials.
-cleaned_df['Service:Company'] = cleaned_df['Service:Company'].astype(str).str.strip()
 company_mapping = {
     # Mapping numeric codes to corresponding company names
     # Note however, that there are some codes not in the list so it's left as is
@@ -163,12 +124,9 @@ company_mapping = {
     'TCS': 'TCS',
     'VIAS': 'VIAS'
 }
-cleaned_df['Service:Company'] = cleaned_df['Service:Company'].replace(company_mapping)
 
-
-# Standardizing service types
-# All are title case and have unnecessary spaces removed.
-cleaned_df['Service:Type'] = cleaned_df['Service:Type'].astype(str).str.strip().str.title()
+# We noticed that there are some services that have different names but are actually the same service.
+# For future consistency, we have mapped the rest of the services to the names we'll be using to represent them in our reports.
 service_type_mapping = {
     # Same service so mapping to one name for consistency
     'Ice': 'Ice International',
@@ -196,261 +154,309 @@ service_type_mapping = {
     'Taxibus Ipv Trein': 'Taxibus Ipv Trein'
 }
 
-cleaned_df['Service:Type'] = cleaned_df['Service:Type'].replace(service_type_mapping)
+# Gets all filenames of monthly csvs of 2025
+MONTHLY_CSV_FILES = [f"services-2025-{i:02d}.csv" for i in range(1, 13)]
+# For the one time creation of the time dimension table
+FIRST_PASS = True
 
-# Date and Time Standardization
-cleaned_df['Service:Date'] = pd.to_datetime(cleaned_df['Service:Date'], format='%Y-%m-%d', errors='coerce')
-cleaned_df['Stop:Arrival time'] = pd.to_datetime(cleaned_df['Stop:Arrival time'], utc=True, errors='coerce')
-cleaned_df['Stop:Departure time'] = pd.to_datetime(cleaned_df['Stop:Departure time'], utc=True, errors='coerce')
+# Cycles through each month instead of each year to ease RAM usage
+for CSV_FILE in MONTHLY_CSV_FILES:
+    print(f"Extracting Monthly File: {CSV_FILE}")
 
-# Standardizing null values for delays in minutes to 0, and converting to integer for loading into the table.
-numeric_cols = ['Stop:Arrival delay', 'Stop:Departure delay', 'Service:Maximum delay']
-for col in numeric_cols:
-    if col in cleaned_df.columns:
-        cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors='coerce').fillna(0).astype(int)
+    try:
+        raw_df = pd.read_csv(CSV_FILE)
+    except FileNotFoundError:
+        print(f"Warning: File '{CSV_FILE}' not found. Skipping...\n")
+        continue
 
-# Handles boolean columns to have unified TRUE and FALSE values.
-bool_cols = [
-    'Service:Completely cancelled',
-    'Service:Partly cancelled',
-    'Stop:Arrival cancelled',
-    'Stop:Departure cancelled'
-]
-for col in bool_cols:
-    if col in cleaned_df.columns:
-        cleaned_df[col] = cleaned_df[col].astype(str).str.upper().isin(['TRUE', '1', '1.0'])
+    print(f"Dutch Railway Monthly Dataset loaded: '{CSV_FILE}'")
+    print(f"Entries extracted: {len(raw_df):,}\n")
 
-# dim_date table true to the schema
-unique_dates = pd.Series(cleaned_df['Service:Date'].dropna().unique()).sort_values()
-dim_date = pd.DataFrame({
-    'date_key': unique_dates.dt.strftime('%Y%m%d').astype(int),
-    'full_date': unique_dates.dt.date,
-    'day': unique_dates.dt.day,
-    'day_of_week': unique_dates.dt.day_name(),
-    'week_number': unique_dates.dt.isocalendar().week.astype(int),
-    'month': unique_dates.dt.month,
-    'month_name': unique_dates.dt.month_name(),
-    'quarter': unique_dates.dt.quarter,
-    'year': unique_dates.dt.year,
-    'is_weekend': unique_dates.dt.dayofweek >= 5
-})
-unknown_date_row = pd.DataFrame([{
-    'date_key': -1,
-    'full_date': date(1000, 1, 1),
-    'day': -1,
-    'day_of_week': 'N/A',
-    'week_number': -1,
-    'month': -1,
-    'month_name': 'N/A',
-    'quarter': -1,
-    'year': -1,
-    'is_weekend': False
-}])
+    # Auditing initial columns, you can enable this triple quoted section
+    # to see the unique values of each column in the original dataset.
 
-dim_date = pd.concat([unknown_date_row, dim_date], ignore_index=True)
+    '''
+    for col in raw_df.columns:
+        uniques = raw_df[col].unique()
+        try:
+            sorted_uniques = sorted(uniques.tolist(), key=lambda x: (x is None, x))
+        except TypeError:
+            sorted_uniques = uniques.tolist()
+            
+        print(f"Attribute Field: '{col}'")
+        print(f"  ├─ Storage Data Type:   {raw_df[col].dtype}")
+        print(f"  ├─ Unique Value Count:  {len(uniques):,}")
+        print(f"  └─ Distinct Values:     {sorted_uniques}")
+        print("-" * 80 + "\n")
+    '''
 
-# dim_station table true to the schema & accounting for unknown station keys
-dim_station_raw = cleaned_df[['Stop:Station code', 'Stop:Station name']].drop_duplicates(subset=['Stop:Station code']).dropna()
+    cleaned_df = raw_df.copy()
 
-unknown_station_row = pd.DataFrame([{
-    'station_code': 'UNK',
-    'station_name': 'Unknown Station'
-}])
+    # String Cleanups
+    cleaned_df['Service:RDT-ID'] = cleaned_df['Service:RDT-ID'].astype(str).str.strip()
+    cleaned_df['Stop:RDT-ID'] = cleaned_df['Stop:RDT-ID'].astype(str).str.strip()
+    cleaned_df['Service:Train number'] = cleaned_df['Service:Train number'].astype(str).str.strip()
 
-dim_station = pd.concat([
-    unknown_station_row, 
-    pd.DataFrame({
+    # Station code and name have some unknown values, standardize them to UNK and Unknown respectively
+    cleaned_df['Stop:Station code'] = cleaned_df['Stop:Station code'].fillna('UNK').astype(str).str.strip().str.upper()
+    cleaned_df['Stop:Station name'] = cleaned_df['Stop:Station name'].fillna('Unknown').astype(str).str.strip()
+
+    # Standardizing company names
+    # All unnecessary spaces are removed with casing preserved as is as some companies have their full names while others have initials.
+    cleaned_df['Service:Company'] = cleaned_df['Service:Company'].astype(str).str.strip()
+    cleaned_df['Service:Company'] = cleaned_df['Service:Company'].replace(company_mapping)
+
+    # Standardizing service types
+    # All are title case and have unnecessary spaces removed.
+    cleaned_df['Service:Type'] = cleaned_df['Service:Type'].astype(str).str.strip().str.title()
+    cleaned_df['Service:Type'] = cleaned_df['Service:Type'].replace(service_type_mapping)
+
+    # Date and Time Standardization
+    cleaned_df['Service:Date'] = pd.to_datetime(cleaned_df['Service:Date'], format='%Y-%m-%d', errors='coerce')
+    cleaned_df['Stop:Arrival time'] = pd.to_datetime(cleaned_df['Stop:Arrival time'], utc=True, errors='coerce')
+    cleaned_df['Stop:Departure time'] = pd.to_datetime(cleaned_df['Stop:Departure time'], utc=True, errors='coerce')
+
+    # Standardizing null values for delays in minutes to -1, and converting to integer for loading into the table.
+    numeric_cols = ['Stop:Arrival delay', 'Stop:Departure delay', 'Service:Maximum delay']
+    for col in numeric_cols:
+        if col in cleaned_df.columns:
+            cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors='coerce').fillna(-1).astype(int)
+
+    # Handles boolean columns to have unified TRUE and FALSE values.
+    bool_cols = [
+        'Service:Completely cancelled',
+        'Service:Partly cancelled',
+        'Stop:Arrival cancelled',
+        'Stop:Departure cancelled'
+    ]
+    for col in bool_cols:
+        if col in cleaned_df.columns:
+            cleaned_df[col] = cleaned_df[col].astype(str).str.upper().isin(['TRUE', '1', '1.0'])
+
+    # dim_date table true to the schema & accounts for unknown dates
+    unique_dates = pd.Series(cleaned_df['Service:Date'].dropna().unique()).sort_values()
+    dim_date_data = pd.DataFrame({
+        'date_key': unique_dates.dt.strftime('%Y%m%d').astype(int),
+        'full_date': unique_dates.dt.date,
+        'day': unique_dates.dt.day,
+        'day_of_week': unique_dates.dt.day_name(),
+        'week_number': unique_dates.dt.isocalendar().week.astype(int),
+        'month': unique_dates.dt.month,
+        'month_name': unique_dates.dt.month_name(),
+        'quarter': unique_dates.dt.quarter,
+        'year': unique_dates.dt.year,
+        'is_weekend': unique_dates.dt.dayofweek >= 5
+    })
+    unknown_date_row = pd.DataFrame([{
+        'date_key': -1, 'full_date': date(1000, 1, 1), 'day': -1, 
+        'day_of_week': 'N/A', 'week_number': -1, 'month': -1, 
+        'month_name': 'N/A', 'quarter': -1, 'year': -1, 'is_weekend': False
+    }])
+    dim_date = pd.concat([unknown_date_row, dim_date_data], ignore_index=True)
+
+    # dim_station table true to the schema & accounts for unknown stations
+    dim_station_raw = cleaned_df[['Stop:Station code', 'Stop:Station name']].dropna(subset=['Stop:Station code']).drop_duplicates(subset=['Stop:Station code'])
+    dim_station_data = pd.DataFrame({
         'station_code': dim_station_raw['Stop:Station code'],
         'station_name': dim_station_raw['Stop:Station name']
     })
-], ignore_index=True)
+    unknown_station_row = pd.DataFrame([{'station_code': 'UNK', 'station_name': 'Unknown Station'}])
+    dim_station = pd.concat([unknown_station_row, dim_station_data], ignore_index=True)
 
-# dim_service table true to the schema & accounting for unknown service keys 
-dim_service_raw = cleaned_df[['Service:Train number', 'Service:Type', 'Service:Company']].drop_duplicates().dropna()
-
-unknown_service_row = pd.DataFrame([{
-    'train_number': 'UNK',
-    'service_type': 'Unknown',
-    'company': 'Unknown'
-}])
-
-dim_service = pd.concat([
-    unknown_service_row,
-    pd.DataFrame({
+    # dim_service table true to the schema & accounts for unknown services
+    dim_service_raw = cleaned_df[['Service:Train number', 'Service:Type', 'Service:Company']].drop_duplicates().dropna()
+    dim_service_data = pd.DataFrame({
         'train_number': dim_service_raw['Service:Train number'],
         'service_type': dim_service_raw['Service:Type'],
         'company': dim_service_raw['Service:Company']
     })
-], ignore_index=True)
+    unknown_service_row = pd.DataFrame([{'train_number': 'UNK', 'service_type': 'Unknown', 'company': 'Unknown'}])
+    dim_service = pd.concat([unknown_service_row, dim_service_data], ignore_index=True)
 
-# dim_time table true to the schema
-time_range = pd.date_range("00:00", "23:59", freq="min")
+    # Creation of time dimension table and handling unknown time values
+    if FIRST_PASS:
 
-dim_time = pd.DataFrame({
-    'time_key': time_range.strftime('%H%M%S').astype(int),
-    'full_time': time_range.time,
-    'hour': time_range.hour,
-    'minute': time_range.minute,
-    'time_period': pd.Series(
-        pd.cut(
-            time_range.hour, 
-            bins=[-1, 5, 11, 16, 21, 24], 
-            labels=['Late Night', 'Morning', 'Afternoon', 'Evening', 'Night'], 
-            ordered=False
-        )
-    ).astype(str).replace({'Late Night': 'Night'})
-})
+        # dim_time table assembly
+        time_range = pd.date_range("00:00", "23:59", freq="min")
+        dim_time = pd.DataFrame({
+            'time_key': time_range.strftime('%H%M%S').astype(int),
+            'full_time': time_range.time,
+            'hour': time_range.hour,
+            'minute': time_range.minute,
+            'time_period': pd.Series(
+                pd.cut(
+                    time_range.hour, 
+                    bins=[-1, 5, 11, 16, 21, 24], 
+                    labels=['Late Night', 'Morning', 'Afternoon', 'Evening', 'Night'], 
+                    ordered=False
+                )
+            ).astype(str).replace({'Late Night': 'Night'})
+        })
 
-unknown_time_row = pd.DataFrame([{
-    'time_key': -1,
-    'full_time': time(0, 0, 0),
-    'hour': -1,
-    'minute': -1,
-    'time_period': 'N/A'
-}])
+        # Accounts for unknown time
+        unknown_time_row = pd.DataFrame([{
+            'time_key': -1,
+            'full_time': time(0, 0, 0),
+            'hour': -1,
+            'minute': -1,
+            'time_period': 'N/A'
+        }])
+        dim_time = pd.concat([unknown_time_row, dim_time], ignore_index=True)
 
-dim_time = pd.concat([unknown_time_row, dim_time], ignore_index=True)
+        with engine.begin() as conn:
+            dim_time.to_sql('dim_time', con=conn, if_exists='append', index=False)
 
-# Load dimension tables into the database
-with engine.begin() as conn:
-    dim_date.to_sql('dim_date', con=conn, if_exists='append', index=False)
+        FIRST_PASS = False
 
-    dim_station.to_sql('dim_station', con=conn, if_exists='append', index=False)
+    # Updates only unique entries, preventing duplicates
+    with engine.begin() as conn:
+        existing_dates = pd.read_sql("SELECT date_key FROM dim_date", con=conn)['date_key'].tolist()
+        new_dates = dim_date[~dim_date['date_key'].isin(existing_dates)]
+        if not new_dates.empty:
+            new_dates.to_sql('dim_date', con=conn, if_exists='append', index=False)
 
-    dim_service.to_sql('dim_service', con=conn, if_exists='append', index=False)
+        existing_stations = pd.read_sql("SELECT station_code FROM dim_station", con=conn)['station_code'].tolist()
+        new_stations = dim_station[~dim_station['station_code'].isin(existing_stations)]
+        if not new_stations.empty:
+            new_stations.to_sql('dim_station', con=conn, if_exists='append', index=False)
 
-    dim_time.to_sql('dim_time', con=conn, if_exists='append', index=False)
+        existing_services = pd.read_sql("SELECT train_number, service_type, company FROM dim_service", con=conn)
+        new_services = dim_service.merge(existing_services, on=['train_number', 'service_type', 'company'], how='left', indicator=True)
+        new_services = new_services[new_services['_merge'] == 'left_only'].drop(columns=['_merge'])
+        if not new_services.empty:
+            new_services.to_sql('dim_service', con=conn, if_exists='append', index=False)
 
-# Fetch surrogate keys generated by MySQL AUTO_INCREMENT
-with engine.connect() as conn:
-    db_dim_station = pd.read_sql("SELECT station_key, station_code FROM dim_station", con=conn)
-    db_dim_service = pd.read_sql("SELECT service_key, train_number, service_type, company FROM dim_service", con=conn)
+    # Fetch surrogate keys generated by MySQL AUTO_INCREMENT
+    with engine.connect() as conn:
+        db_dim_station = pd.read_sql("SELECT station_key, station_code FROM dim_station", con=conn)
+        db_dim_service = pd.read_sql("SELECT service_key, train_number, service_type, company FROM dim_service", con=conn)
 
-# Fact table assembly
-fact_df = cleaned_df.copy()
+    # Fact table assembly
+    fact_df = cleaned_df.copy()
 
-# Date and Time Mapping
-# Handling of null values done by filling with -1 to represent unknown times in the fact table.
-fact_df['date_key'] = (
-    fact_df['Service:Date']
-    .dt.strftime('%Y%m%d')
-    .fillna('-1')
-    .astype('int64')
-)
+    # Date and Time Mapping
+    # Handling of null values done by filling with -1 to represent unknown times in the fact table.
+    fact_df['date_key'] = (
+        fact_df['Service:Date']
+        .dt.strftime('%Y%m%d')
+        .fillna('-1')
+        .astype('int64')
+    )
 
-# Earlier problems were seen with formatting of time values, this ensures keys exactly match integer HHMMSS format.
-fact_df['arrival_time_key'] = (
-    fact_df['Stop:Arrival time']
-    .dt.strftime('%H%M00')
-    .fillna('-1')
-    .astype('int64')
-)
+    # Earlier problems were seen with formatting of time values, this ensures keys exactly match integer HHMMSS format.
+    fact_df['arrival_time_key'] = (
+        fact_df['Stop:Arrival time']
+        .dt.strftime('%H%M00')
+        .fillna('-1')
+        .astype('int64')
+    )
 
-fact_df['departure_time_key'] = (
-    fact_df['Stop:Departure time']
-    .dt.strftime('%H%M00')
-    .fillna('-1')
-    .astype('int64')
-)
+    fact_df['departure_time_key'] = (
+        fact_df['Stop:Departure time']
+        .dt.strftime('%H%M00')
+        .fillna('-1')
+        .astype('int64')
+    )
 
-# Lookup surrogate keys for station and service dimensions
-fact_df = fact_df.merge(
-    db_dim_station, 
-    left_on='Stop:Station code', 
-    right_on='station_code', 
-    how='left'
-)
+    # Lookup surrogate keys for station and service dimensions
+    fact_df = fact_df.merge(
+        db_dim_station, 
+        left_on='Stop:Station code', 
+        right_on='station_code', 
+        how='left'
+    )
 
-# Numeric value, station key: handling of null values done by filling with -1 to represent unknown station keys
-fact_df['station_key'] = fact_df['station_key'].fillna('-1').astype('int64')
+    # Numeric value, station key: handling of null values done by filling with -1 to represent unknown station keys
+    fact_df['station_key'] = fact_df['station_key'].fillna('-1').astype('int64')
 
-fact_df = fact_df.merge(
-    db_dim_service, 
-    left_on=['Service:Train number', 'Service:Type', 'Service:Company'], 
-    right_on=['train_number', 'service_type', 'company'], 
-    how='left'
-)
+    fact_df = fact_df.merge(
+        db_dim_service, 
+        left_on=['Service:Train number', 'Service:Type', 'Service:Company'], 
+        right_on=['train_number', 'service_type', 'company'], 
+        how='left'
+    )
 
-# Numeric value, service key: handling of null values done by filling with -1 to represent unknown service keys
-fact_df['service_key'] = fact_df['service_key'].fillna('-1').astype('int64')
+    # Numeric value, service key: handling of null values done by filling with -1 to represent unknown service keys
+    fact_df['service_key'] = fact_df['service_key'].fillna('-1').astype('int64')
 
-# Final fact table assembly
-fact_table = pd.DataFrame({
-    'date_key': fact_df['date_key'],
-    'station_key': fact_df['station_key'],
-    'service_key': fact_df['service_key'],
-    'arrival_time_key': fact_df['arrival_time_key'],
-    'departure_time_key': fact_df['departure_time_key'],
-    'service_rdt_id': fact_df['Service:RDT-ID'],
-    'stop_rdt_id': fact_df['Stop:RDT-ID'],
-    'arrival_delay': fact_df['Stop:Arrival delay'],
-    'departure_delay': fact_df['Stop:Departure delay'],
-    'arrival_cancelled': fact_df['Stop:Arrival cancelled'],
-    'departure_cancelled': fact_df['Stop:Departure cancelled'],
-    'service_maximum_delay': fact_df['Service:Maximum delay'],
-    'service_completely_cancelled': fact_df['Service:Completely cancelled'],
-    'service_partly_cancelled': fact_df['Service:Partly cancelled'],
-    'stop_count': 1
-})
+    # Final fact table assembly
+    fact_table = pd.DataFrame({
+        'date_key': fact_df['date_key'],
+        'station_key': fact_df['station_key'],
+        'service_key': fact_df['service_key'],
+        'arrival_time_key': fact_df['arrival_time_key'],
+        'departure_time_key': fact_df['departure_time_key'],
+        'service_rdt_id': fact_df['Service:RDT-ID'],
+        'stop_rdt_id': fact_df['Stop:RDT-ID'],
+        'arrival_delay': fact_df['Stop:Arrival delay'],
+        'departure_delay': fact_df['Stop:Departure delay'],
+        'arrival_cancelled': fact_df['Stop:Arrival cancelled'],
+        'departure_cancelled': fact_df['Stop:Departure cancelled'],
+        'service_maximum_delay': fact_df['Service:Maximum delay'],
+        'service_completely_cancelled': fact_df['Service:Completely cancelled'],
+        'service_partly_cancelled': fact_df['Service:Partly cancelled'],
+        'stop_count': 1
+    })
 
-# Auditing final columns, you can enable this triple quoted section
-# to see the first 1000 unique values of each column in the fact and dimension tables
+    # Auditing final columns, you can enable this triple quoted section
+    # to see the first 1000 unique values of each column in the fact and dimension tables
 
-'''
-def print_full_entity_audit(entity_name, df, columns_to_audit=None, max_uniques_to_print=1000):
-    print(f"--- [{entity_name.upper()} ENTITY AUDIT] ---")
-    print(f"Total Record Count: {len(df):,}")
-    
-    cols = columns_to_audit if columns_to_audit else df.columns
-    for col in cols:
-        uniques = df[col].unique()
-        unique_count = len(uniques)
+    '''
+    def print_full_entity_audit(entity_name, df, columns_to_audit=None, max_uniques_to_print=1000):
+        print(f"--- [{entity_name.upper()} ENTITY AUDIT] ---")
+        print(f"Total Record Count: {len(df):,}")
         
-        print(f"Attribute Field: '{col}'")
-        print(f"  ├─ Storage Data Type:   {df[col].dtype}")
-        print(f"  ├─ Total Unique Count:  {unique_count:,}")
-        
-        # Filter: Only print the list if unique entries are strictly under threshold
-        if unique_count < max_uniques_to_print:
-            try:
-                sorted_uniques = sorted(uniques.tolist(), key=lambda x: (x is None, str(x)))
-            except TypeError:
-                sorted_uniques = uniques.tolist()
-            print(f"  └─ Full Uniques List:\n     {sorted_uniques}")
-        else:
-            print(f"  └─ Full Uniques List:   [SUPPRESSED - Exceeds {max_uniques_to_print:,} entries]")
+        cols = columns_to_audit if columns_to_audit else df.columns
+        for col in cols:
+            uniques = df[col].unique()
+            unique_count = len(uniques)
             
-        print("-" * 75)
-    print("\n")
+            print(f"Attribute Field: '{col}'")
+            print(f"  ├─ Storage Data Type:   {df[col].dtype}")
+            print(f"  ├─ Total Unique Count:  {unique_count:,}")
+            
+            # Filter: Only print the list if unique entries are strictly under threshold
+            if unique_count < max_uniques_to_print:
+                try:
+                    sorted_uniques = sorted(uniques.tolist(), key=lambda x: (x is None, str(x)))
+                except TypeError:
+                    sorted_uniques = uniques.tolist()
+                print(f"  └─ Full Uniques List:\n     {sorted_uniques}")
+            else:
+                print(f"  └─ Full Uniques List:   [SUPPRESSED - Exceeds {max_uniques_to_print:,} entries]")
+                
+            print("-" * 75)
+        print("\n")
 
 
-# 1. dim_date table
-print_full_entity_audit("dim_date", dim_date)
+    # 1. dim_date table
+    print_full_entity_audit("dim_date", dim_date)
 
-# 2. dim_time table
-print_full_entity_audit("dim_time", dim_time)
+    # 2. dim_time table
+    print_full_entity_audit("dim_time", dim_time)
 
-# 3. dim_station table
-print_full_entity_audit("dim_station", dim_station)
+    # 3. dim_station table
+    print_full_entity_audit("dim_station", dim_station)
 
-# 4. dim_service table
-print_full_entity_audit("dim_service", dim_service)
+    # 4. dim_service table
+    print_full_entity_audit("dim_service", dim_service)
 
-# 5. fact_train_stop table
-fact_target_cols = [
-    'arrival_cancelled', 
-    'departure_cancelled', 
-    'service_completely_cancelled', 
-    'service_partly_cancelled',
-    'arrival_delay', 
-    'departure_delay', 
-    'service_maximum_delay'
-]
-print_full_entity_audit("fact_train_stop", fact_table, columns_to_audit=fact_target_cols)
-'''
+    # 5. fact_train_stop table
+    fact_target_cols = [
+        'arrival_cancelled', 
+        'departure_cancelled', 
+        'service_completely_cancelled', 
+        'service_partly_cancelled',
+        'arrival_delay', 
+        'departure_delay', 
+        'service_maximum_delay'
+    ]
+    print_full_entity_audit("fact_train_stop", fact_table, columns_to_audit=fact_target_cols)
+    '''
 
-with engine.begin() as conn:
-    print(f"Loading entries into 'fact_train_stop' {len(fact_table):,} rows\n")
-    fact_table.to_sql('fact_train_stop', con=conn, if_exists='append', index=False, chunksize=10000)
+    # Loads entries and added chunksize to make sure loading is sizable enough 
+    with engine.begin() as conn:
+        print(f"Loading entries into 'fact_train_stop' {len(fact_table):,} rows\n")
+        fact_table.to_sql('fact_train_stop', con=conn, if_exists='append', index=False, chunksize=10000)
 
 print("ETL pipeline completed, Go ahead and check the database! Good luck!")

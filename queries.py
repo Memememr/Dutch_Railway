@@ -1,7 +1,7 @@
 import database
 
 # Overall Delays and Cancaellations
-def get_avg_cancellation_report(time_granularity = "Monthly", selected_month = "ALL", selected_station="ALL"):
+def get_avg_delay_report(time_granularity = "Monthly", selected_month = "ALL", selected_station="ALL"):
     time_column = {
             "Yearly": "d.year",
             "Quarterly": "d.quarter",
@@ -56,23 +56,70 @@ def get_avg_cancellation_report(time_granularity = "Monthly", selected_month = "
     return database.run_query(query, params)
 
 
-#2.  Stations with most departure cancellations
-def get_station_cancellations():
+#2.  Cancellations in a station at a certain time
+def get_station_cancellations(date_granularity="Yearly", month = "ALL", station ="ALL"):
+    granularity_map = {
+                "Yearly": "d.year",
+                "Quarterly": "d.quarter",
+                "Monthly": "d.month_name",
+                "Weekly": "d.week_number",
+                "Daily": "d.day",
+            }
+
+    date_column = granularity_map.get(date_granularity, "d.year")
+    
+    where_clauses = ["1=1"] 
+    params = {}
+    
+    if month != "ALL":
+        where_clauses.append("d.month_name = :month")
+        params["month"] = str(month)
+    
+    if station != "ALL":
+        where_clauses.append("s.station_name = :station")
+        params["station"] = str(station)
+    
+    where_sql = " AND ".join(where_clauses)
 
     query = f"""
-    SElECT st.station_name
-    FROM fact_train_stop f
-    JOIN dim_station st ON f.station_key = st.station_key
-    GROUP BY station_name
+    WITH station_cancellation AS (
+        SELECT 
+            {date_column} AS time_period,
+            st.station_name AS station_name,
+            
+            -- Total Cancelled Stops (Arrival OR Departure)
+            SUM(CASE WHEN f.arrival_cancelled = 1 OR f.departure_cancelled = 1 THEN 1 ELSE 0 END) AS total_cancelled,
+            
+            -- Full vs Partial Service Failures
+            SUM(CASE WHEN f.service_completely_cancelled = 1 THEN 1 ELSE 0 END) AS total_fully_cancelled,
+            SUM(CASE WHEN f.service_partly_cancelled = 1 THEN 1 ELSE 0 END) AS total_partially_cancelled
+        FROM fact_train_stop AS f
+        JOIN dim_station AS st ON f.station_key = st.station_key
+        JOIN dim_date AS d ON f.date_key = d.date_key
+        WHERE {where_sql}
+        GROUP BY time_period, st.station_name
+    )
+    SELECT
+        time_period,
+        station_name,
+        total_cancelled,
+        total_fully_cancelled,
+        total_partially_cancelled,
+
+        -- Window Functions: Rank within time period
+        DENSE_RANK() OVER (PARTITION BY time_period ORDER BY total_cancelled DESC) AS total_cancelled_rank,
+        DENSE_RANK() OVER (PARTITION BY time_period ORDER BY total_fully_cancelled DESC) AS fully_cancelled_rank
+    FROM station_cancellation
+    ORDER BY time_period ASC, total_cancelled_rank ASC;
     """
 
-    params = {}
+    return database.run_query(query, params)
 
-    return database.run(query)
+
 
 # 3. Service cancellation rate
 
-def get_service_cancellation(service_level="Company", company="ALL", service_type="ALL", train="ALL"):
+def get_service_reliability(service_level="Company", company="ALL", service_type="ALL", train="ALL"):
 
     time_column = {
             "Company":"se.company_name",
@@ -139,5 +186,7 @@ def get_service_cancellation(service_level="Company", company="ALL", service_typ
 
 
 
-# 4. Services that have the most delays 
+# 4. Service-related delays
+
+
 

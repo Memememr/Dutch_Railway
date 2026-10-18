@@ -27,43 +27,27 @@ COL_ALIASES = {"departure_delay": "avg_departure_delay", "arrival_delay": "avg_a
 def kpi_row(items: list[tuple[str, str, str | None]]) -> None:
     for col, (label, value, delta) in zip(st.columns(len(items)), items):
         col.metric(label, value, delta)
- 
- 
-def download_button(df: pd.DataFrame, name: str) -> None:
-    st.download_button(
-        "⬇️ Download CSV", df.to_csv(index=False).encode(), f"{name}.csv", "text/csv"
-    )
- 
+
  
 def coming_soon(title: str, description: str, planned: list[str]) -> None:
-    st.info(f"**{title}** is still in development.")
-    st.caption(description)
-    st.markdown("**Planned sections** (same layout as the other reports):")
-    st.markdown("\n".join(f"- {p}" for p in planned))
+    st.dataframe(queries.get_station_cancellations())
  
  
 # ----------------------------------------------------------------------------
 # REPORT 1: Average delays (get_avg_cancellation_report)
 # ----------------------------------------------------------------------------
 def render_avg_delay_report() -> None:
-   st.dataframe(queries.get_avg_cancellation_report())
+   st.dataframe(queries.get_avg_delay_report())
  
 # ----------------------------------------------------------------------------
-# REPORTS 2-4 (placeholders -- same shell, fill in when queries are ready)
+# REPORT 2: Station cancellations (get_station_cancellation_report)
 # ----------------------------------------------------------------------------
 def render_station_cancellations() -> None:
-    coming_soon(
-        "Station Cancellations  ·  get_station_cancellations()",
-        "Cancellation counts and rates per station.",
-        ["KPI cards (total cancellations, rate, worst station)",
-         "Trend line over time (reuse the granularity control)",
-         "Bar chart by station + heatmap station × period",
-         "Summary table"],
-    )
+    st.dataframe(queries.get_station_cancellations())
  
  
 def render_service_company_reliability() -> None:
-    st.dataframe(queries.get_service_cancellation())
+    st.dataframe(queries.get_service_reliability())
  
  
 def render_most_delayed_services() -> None:
